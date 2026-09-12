@@ -19,17 +19,17 @@
     "Rust",
     "Go"
   ],
-  "backdrop": "#14121c",
+  "backdrop": "#0b0a0f",
   "swatches": [
-    "#514961",
-    "#556997",
-    "#65a1c0",
-    "#6e9c66",
-    "#c4b354",
-    "#e7d85f",
-    "#b1615f",
-    "#b960ac"
+    "#170c08",
+    "#51311c",
+    "#70482f",
+    "#92592d",
+    "#c57737",
+    "#ce9768",
+    "#ebc39a",
+    "#fdf5e6"
   ],
   "private_contributions": false,
-  "portrait_image": "portrait.jpg"
+  "portrait_image": "launch.jpg"
 }

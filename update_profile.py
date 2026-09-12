@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Render the profile card: dark_mode.svg and light_mode.svg.
 
-A terminal window. Left: the picture named by card.json's `portrait_image`,
-embedded in the SVG. Right: a neofetch-style panel with live GitHub stats.
+A terminal window. Left: a neofetch-style panel with live GitHub stats.
+Right: the picture named by card.json's `portrait_image`, embedded in the SVG.
 Who it is about comes from card.json. Stdlib only, so the daily Action needs
 no install step.
 """
@@ -11,7 +11,9 @@ import calendar
 import html
 import json
 import os
+import re
 import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -40,16 +42,16 @@ LANGS = [(name, LINGUIST.get(name, "#8b949e")) for name in CONFIG.get("langs", [
 # call, asked in the brief. Off: only commits in public repositories are counted.
 PRIVATE_CONTRIBUTIONS = bool(CONFIG.get("private_contributions", False))
 SWATCHES = CONFIG.get("swatches", ["#0f3d3e", "#1f6f6f", "#2fa39b", "#7fd3c7", "#f3d3b0", "#e8a878", "#c7743f", "#7a3b1f"])
-# The picture on the left, a file next to card.json. regen.sh makes it.
-PORTRAIT_IMAGE = CONFIG.get("portrait_image", "portrait.jpg")
+# The picture on the right, a file next to card.json. regen.sh makes it.
+PORTRAIT_IMAGE = CONFIG.get("portrait_image", "launch.jpg")
 
 CARD_W, CARD_H, BAR_H = 920, 540, 34
-BACKDROP_W = 442  # the portrait's backdrop runs edge to edge, left of the panel
-# A dark solid behind the picture, in both themes.
+PHOTO_W = 442  # the picture runs edge to edge down the right side of the card
+PHOTO_BOX = (CARD_W - PHOTO_W, BAR_H + 1, PHOTO_W, CARD_H - BAR_H - 1)  # x, y, width, height
+# Shows in both themes wherever the picture does not reach.
 BACKDROP = CONFIG.get("backdrop", "#161b2e")
-ART_BOX = (20, BAR_H + 16, 410, CARD_H - BAR_H - 32)  # x, y, width, height for the portrait
-PX = 462  # panel left edge
-PANEL_W = CARD_W - PX - 24
+PX = 36  # panel left edge
+PANEL_W = CARD_W - PHOTO_W - PX - 24
 MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace"
 SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif"
 
@@ -139,17 +141,19 @@ def count_commits(years, private):
 
 
 
-def picture(name):
-    """The picture itself, embedded, centred and scaled to fit the art box.
+def picture(name, mode):
+    """The picture, embedded, covering its side of the card.
 
     Embedded because GitHub serves the card through its image proxy, where a
-    reference to another file would not resolve.
+    reference to another file would not resolve. `slice` fills the panel and
+    crops the overflow, so no card background shows through; the card's own
+    clip keeps the rounded corner.
     """
     data = (HERE / name).read_bytes()
     mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif"}[Path(name).suffix.lower()]
-    x, y, w, h = ART_BOX
-    return [f'<image x="{x}" y="{y}" width="{w}" height="{h}" preserveAspectRatio="xMidYMid meet" '
-            f'href="data:{mime};base64,{base64.b64encode(data).decode()}"/>']
+    x, y, w, h = PHOTO_BOX
+    return (f'<image x="{x}" y="{y}" width="{w}" height="{h}" preserveAspectRatio="xMidYMid slice" '
+            f'clip-path="url(#card-{mode})" href="data:{mime};base64,{base64.b64encode(data).decode()}"/>')
 
 
 def panel(mode, stats):
@@ -159,8 +163,6 @@ def panel(mode, stats):
     mono = f'font-family="{MONO}" font-size="13"'
     vx = PX + 86  # value column
     out = [
-        f'<text x="{PX}" y="100" {mono}><tspan fill="{p["accent"]}">❯</tspan>'
-        f'<tspan fill="{p["text"]}"> neofetch</tspan></text>',
         f'<text x="{PX}" y="146" font-family="{SANS}" font-size="30" font-weight="700" fill="{p["text"]}">'
         f'{e(NAME)}</text>',
         f'<text x="{PX}" y="172" font-family="{SANS}" font-size="14">'
@@ -217,24 +219,49 @@ def render(mode, stats):
         f'<stop offset="1" stop-color="{p["key"]}" stop-opacity="0"/></linearGradient></defs>',
         f'<g clip-path="url(#card-{mode})"><rect width="{CARD_W}" height="{CARD_H}" fill="{p["bg"]}"/>'
         f'<rect width="{CARD_W}" height="{BAR_H}" fill="{p["bar"]}"/>'
-        f'<rect y="{BAR_H + 1}" width="{BACKDROP_W}" height="{CARD_H - BAR_H - 1}" fill="{BACKDROP}"/>'
+        f'<rect x="{PHOTO_BOX[0]}" y="{PHOTO_BOX[1]}" width="{PHOTO_BOX[2]}" height="{PHOTO_BOX[3]}" fill="{BACKDROP}"/>'
         f'<rect y="{BAR_H}" width="{CARD_W}" height="1" fill="{p["border"]}"/></g>',
+        picture(PORTRAIT_IMAGE, mode),
         "".join(f'<circle cx="{22 + i * 20}" cy="{BAR_H / 2}" r="6" fill="{c}"/>'
                 for i, c in enumerate(["#ff5f57", "#febc2e", "#28c840"])),
         f'<text x="{CARD_W / 2}" y="{BAR_H / 2 + 4.5}" text-anchor="middle" font-family="{SANS}" font-size="13" '
         f'fill="{p["muted"]}">{html.escape(title)}</text>',
         f'<rect x="0.5" y="0.5" width="{CARD_W - 1}" height="{CARD_H - 1}" rx="12" fill="none" stroke="{p["border"]}"/>',
     ]
-    return "\n".join(out + picture(PORTRAIT_IMAGE) + panel(mode, stats) + ["</svg>"])
+    return "\n".join(out + panel(mode, stats) + ["</svg>"])
+
+
+def layout_check(mode):
+    """Read the finished SVG back and hold the layout to fixed numbers.
+
+    Deriving the expected geometry from the same constants the renderer uses
+    would pass however the card moved; these are written out by hand.
+    """
+    svg = ET.fromstring(render(mode, None))
+    ns = "{http://www.w3.org/2000/svg}"
+    clips = {c.get("id") for c in svg.iter(f"{ns}clipPath")}
+    images = list(svg.iter(f"{ns}image"))
+    assert len(images) == 1
+    img = images[0]
+    assert [img.get(k) for k in ("x", "y", "width", "height")] == ["478", "35", "442", "505"]
+    assert img.get("preserveAspectRatio") == "xMidYMid slice"  # fills the panel, no letterboxing
+    # Every clip-path in the card, not just the picture's, must name a clipPath
+    # of this same document: a stale id silently draws nothing on some viewers.
+    refs = [re.fullmatch(r"url\(#(.+)\)", el.get("clip-path")) for el in svg.iter() if "clip-path" in el.attrib]
+    assert refs and all(m and m.group(1) in clips for m in refs)
+    # Without its own clip the picture squares off the card's rounded corner.
+    assert "clip-path" in img.attrib
+    texts = list(svg.iter(f"{ns}text"))
+    # Every word sits left of the picture, and the neofetch prompt line is gone.
+    assert all(float(t.get("x")) < 478 for t in texts if t.get("x"))
+    assert all("neofetch" not in "".join(t.itertext()) for t in texts)
 
 
 def selfcheck():
     assert uptime(date(2023, 12, 28), date(2026, 9, 11)) == (2, 8, 14)
     assert uptime(date(2025, 1, 31), date(2025, 3, 1)) == (0, 1, 1)
     assert uptime(date(2024, 2, 29), date(2025, 2, 28)) == (1, 0, 0)  # Feb 29 clamps to Feb 28
-    x, y, w, h = ART_BOX
-    img = picture(PORTRAIT_IMAGE)[0]
-    assert img.startswith(f'<image x="{x}" y="{y}" width="{w}" height="{h}" preserveAspectRatio="xMidYMid meet" ')
+    img = picture(PORTRAIT_IMAGE, "dark")
     # The picture must arrive whole: a truncated or re-encoded payload is a
     # broken card that still renders.
     assert base64.b64decode(img.split("base64,")[1].split('"')[0], validate=True) == (HERE / PORTRAIT_IMAGE).read_bytes()
@@ -243,8 +270,10 @@ def selfcheck():
         {"repository": {"isPrivate": True}, "contributions": {"totalCount": 7}}]}
     assert count_commits([year], private=False) == 3 and count_commits([year], private=True) == 15
     svg = render("dark", None)
-    assert svg.count("<svg") == 1 and svg.count("<image ") == 1 and f'fill="{BACKDROP}"' in svg
+    assert svg.count("<svg") == 1 and f'fill="{BACKDROP}"' in svg
     assert svg.startswith('<?xml version="1.0" encoding="UTF-8"?>')
+    layout_check("dark")
+    layout_check("light")
     # Without a token the pills show a dash. Checked on the panel alone: the
     # base64 picture would make any whole-document text search meaningless.
     assert "—" in "".join(panel("dark", None))
