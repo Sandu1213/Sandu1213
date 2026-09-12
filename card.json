@@ -1,0 +1,35 @@
+{
+  "login": "Sandu1213",
+  "name": "Duke",
+  "role": "Research / Tooling",
+  "joined": "2019-05-01",
+  "rows": [
+    [
+      "Uptime",
+      null
+    ],
+    [
+      "Speaks",
+      "中文, English"
+    ]
+  ],
+  "langs": [
+    "Python",
+    "TypeScript",
+    "Rust",
+    "Go"
+  ],
+  "backdrop": "#14121c",
+  "swatches": [
+    "#514961",
+    "#556997",
+    "#65a1c0",
+    "#6e9c66",
+    "#c4b354",
+    "#e7d85f",
+    "#b1615f",
+    "#b960ac"
+  ],
+  "private_contributions": false,
+  "portrait_image": "portrait.jpg"
+}

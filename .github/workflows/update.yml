@@ -1,0 +1,62 @@
+name: Refresh profile card and snake
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One refresh at a time per branch: two runs starting from the same commit
+# would race, and the loser's push would be rejected.
+concurrency:
+  group: refresh-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to commit SHAs: these steps hold a token that can
+      # write to this repository, and a tag can be moved to other code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: python update_profile.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Contribution-graph snake, generated into this repo rather than pulled
+      # from a live service, so the README never shows a broken image.
+      - uses: Platane/snk/svg-only@d8f6715049803e982ee5ff501b6b9b7d5deeb09b # v3
+        with:
+          github_user_name: ${{ github.repository_owner }}
+          outputs: |
+            snake.svg?palette=github-light
+            snake-dark.svg?palette=github-dark
+      # The animation loops for 28 s; a reader who asked for less motion keeps
+      # the finished grid instead.
+      - run: >-
+          sed -i
+          's|</style>|@media(prefers-reduced-motion:reduce){*{animation:none!important}}</style>|'
+          snake.svg snake-dark.svg
+      - name: Commit and push, rebasing onto anything that landed meanwhile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dark_mode.svg light_mode.svg snake.svg snake-dark.svg
+          git diff --staged --quiet && { echo "nothing changed"; exit 0; }
+          git commit -m "chore: refresh profile card"
+          branch="${GITHUB_REF_NAME}"
+          # Three rebases at most, then one last push: every rebase is followed
+          # by a push that can use it.
+          for attempt in 1 2 3; do
+            git push origin "HEAD:$branch" && exit 0
+            echo "push rejected, rebasing onto origin/$branch (attempt $attempt)"
+            git fetch origin "$branch"
+            # These files are regenerated in full every run, so the freshly
+            # generated side wins any conflict ("theirs" is the replayed commit).
+            git rebase --strategy-option=theirs "origin/$branch" || { git rebase --abort; exit 1; }
+          done
+          git push origin "HEAD:$branch"
