@@ -39,7 +39,9 @@ ROWS = [tuple(r) for r in CONFIG.get("rows", [["Uptime", None], ["Speaks", "Engl
 LANGS = [(name, LINGUIST.get(name, "#8b949e")) for name in CONFIG.get("langs", ["Python", "TypeScript"])]
 # Eight swatches under the stats; pick them from the portrait's own tones.
 # Whether Commits includes private work (as an anonymous count) is the person's
-# call, asked in the brief. Off: only commits in public repositories are counted.
+# call, asked in the brief. The API publishes that count for every private
+# contribution type at once, not commits alone, so On makes the number "commits
+# in public repositories plus private contributions". Off: public commits only.
 PRIVATE_CONTRIBUTIONS = bool(CONFIG.get("private_contributions", False))
 SWATCHES = CONFIG.get("swatches", ["#0f3d3e", "#1f6f6f", "#2fa39b", "#7fd3c7", "#f3d3b0", "#e8a878", "#c7743f", "#7a3b1f"])
 # The picture on the right, a file next to card.json. regen.sh makes it.

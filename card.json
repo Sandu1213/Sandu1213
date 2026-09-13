@@ -30,6 +30,6 @@
     "#ebc39a",
     "#fdf5e6"
   ],
-  "private_contributions": false,
+  "private_contributions": true,
   "portrait_image": "launch.jpg"
 }
