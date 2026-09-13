@@ -102,21 +102,28 @@ def fetch_stats(token):
     years = " ".join(
         f'y{y}: contributionsCollection(from: "{y}-01-01T00:00:00Z", to: "{y}-12-31T23:59:59Z")'
         " { totalCommitContributions restrictedContributionsCount"
-        " commitContributionsByRepository(maxRepositories: 100) { repository { isPrivate } contributions { totalCount } } }"
+        " commitContributionsByRepository(maxRepositories: 100) { repository { nameWithOwner isPrivate } contributions { totalCount } }"
+        " pullRequestContributionsByRepository(maxRepositories: 100) { repository { nameWithOwner isPrivate } } }"
         for y in range(JOINED.year, datetime.now(timezone.utc).year + 1)
     )
     u = graphql(f"""{{
       user(login: "{USER}") {{
         followers {{ totalCount }}
         repositories(ownerAffiliations: OWNER, isFork: false, privacy: PUBLIC) {{ totalCount }}
-        repositoriesContributedTo(contributionTypes: [COMMIT, PULL_REQUEST], privacy: PUBLIC) {{ totalCount }}
         {years}
       }}
     }}""", token)["user"]
+    collected = [v for k, v in u.items() if k.startswith("y")]
+    # Both repository-derived numbers read truncated lists as complete ones, so
+    # say so rather than undercount in silence.
+    for year in collected:
+        for key in ("commitContributionsByRepository", "pullRequestContributionsByRepository"):
+            if len(year[key]) == 100:
+                print(f"warning: {key} hit the 100-repository ceiling; counts may be low")
     return {
         "Repos": u["repositories"]["totalCount"],
-        "Commits": count_commits([v for k, v in u.items() if k.startswith("y")], PRIVATE_CONTRIBUTIONS),
-        "Contributed": u["repositoriesContributedTo"]["totalCount"],
+        "Commits": count_commits(collected, PRIVATE_CONTRIBUTIONS),
+        "Contributed": count_contributed(collected),
         "Followers": u["followers"]["totalCount"],
     }
 
@@ -138,6 +145,27 @@ def count_commits(years, private):
         return sum(y["totalCommitContributions"] + y["restrictedContributionsCount"] for y in years)
     return sum(c["contributions"]["totalCount"] for y in years
                for c in y["commitContributionsByRepository"] if not c["repository"]["isPrivate"])
+
+
+def count_contributed(years):
+    """Public repositories owned by someone else that this person worked on.
+
+    GitHub's own repositoriesContributedTo answers a narrower question, the
+    repositories contributed to *recently*: it reported 2 for an account with
+    nine outside repositories behind it. The yearly collections carry the whole
+    history, so the repositories are counted from those instead.
+
+    Same maxRepositories: 100 ceiling per year and per contribution type that
+    count_commits lives with.
+    """
+    mine = USER.lower() + "/"
+    return len({
+        c["repository"]["nameWithOwner"]
+        for y in years
+        for key in ("commitContributionsByRepository", "pullRequestContributionsByRepository")
+        for c in y[key]
+        if not c["repository"]["isPrivate"] and not c["repository"]["nameWithOwner"].lower().startswith(mine)
+    })
 
 
 
@@ -265,10 +293,19 @@ def selfcheck():
     # The picture must arrive whole: a truncated or re-encoded payload is a
     # broken card that still renders.
     assert base64.b64decode(img.split("base64,")[1].split('"')[0], validate=True) == (HERE / PORTRAIT_IMAGE).read_bytes()
+    def repo(name, private=False):
+        return {"repository": {"nameWithOwner": name, "isPrivate": private}, "contributions": {"totalCount": 3}}
     year = {"totalCommitContributions": 10, "restrictedContributionsCount": 5, "commitContributionsByRepository": [
         {"repository": {"isPrivate": False}, "contributions": {"totalCount": 3}},
         {"repository": {"isPrivate": True}, "contributions": {"totalCount": 7}}]}
     assert count_commits([year], private=False) == 3 and count_commits([year], private=True) == 15
+    # Own repositories and private ones are not outside work; a repository
+    # worked on across two years, or by both commit and pull request, is one.
+    y1 = {"commitContributionsByRepository": [repo(f"{USER}/mine"), repo("org/one"), repo("org/secret", True)],
+          "pullRequestContributionsByRepository": [repo("org/two")]}
+    y2 = {"commitContributionsByRepository": [repo("org/one")],
+          "pullRequestContributionsByRepository": [repo("org/one"), repo("org/three")]}
+    assert count_contributed([y1, y2]) == 3
     svg = render("dark", None)
     assert svg.count("<svg") == 1 and f'fill="{BACKDROP}"' in svg
     assert svg.startswith('<?xml version="1.0" encoding="UTF-8"?>')
